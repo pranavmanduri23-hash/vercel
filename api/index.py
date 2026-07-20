@@ -2,8 +2,16 @@
 import os
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from authlib.integrations.flask_client import OAuth
-from pymongo import MongoClient
-from pymongo.errors import PyMongoError
+
+# Safely load MongoDB so Vercel NEVER crashes
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import PyMongoError
+    MONGO_AVAILABLE = True
+except ImportError:
+    MONGO_AVAILABLE = False
+    MongoClient = None
+    PyMongoError = Exception
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "super-secret-random-string")
@@ -20,19 +28,16 @@ discord = oauth.register(
     client_kwargs={'scope': 'identify guilds'}
 )
 
-# Safe MongoDB Connection
-mongo_client = None
-mongo_uri = os.getenv("MONGO_URI")
-if mongo_uri:
-    try:
-        mongo_client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-    except Exception:
-        mongo_client = None
-
+# --- LAZY DATABASE CONNECTION (Fixes Vercel Crashes) ---
 def get_db():
-    if mongo_client:
-        return mongo_client.zenith_guard
-    return None
+    if not MONGO_AVAILABLE: return None
+    mongo_uri = os.getenv("MONGO_URI")
+    if not mongo_uri: return None
+    try:
+        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
+        return client.zenith_guard
+    except Exception:
+        return None
 
 def get_live_stats():
     db = get_db()
@@ -61,10 +66,20 @@ def get_user_settings():
         pass
     return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
 
+def get_recent_mod_actions():
+    db = get_db()
+    if not db: return []
+    try:
+        # Fetch the last 5 moderation actions, sorted by newest first
+        actions = list(db.mod_logs.find().sort("timestamp", -1).limit(5))
+        return actions
+    except Exception:
+        return []
+
 # --- PREMIUM CSS & ANIMATIONS ---
 BASE_CSS = """
 <style>
-    :root { --bg: #050810; --bg-2: #0a0f1c; --card: rgba(15, 23, 42, 0.6); --gold: #fbbf24; --gold-glow: rgba(251, 191, 36, 0.4); --blue: #3b82f6; --blue-glow: rgba(59, 130, 246, 0.4); --text: #e2e8f0; --text-bright: #ffffff; --glass-border: rgba(255, 255, 255, 0.1); }
+    :root { --bg: #050810; --bg-2: #0a0f1c; --card: rgba(15, 23, 42, 0.6); --gold: #fbbf24; --gold-glow: rgba(251, 191, 36, 0.4); --blue: #3b82f6; --blue-glow: rgba(59, 130, 246, 0.4); --red: #ef4444; --text: #e2e8f0; --text-bright: #ffffff; --glass-border: rgba(255, 255, 255, 0.1); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body { background-color: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; overflow-x: hidden; line-height: 1.6; position: relative; }
@@ -107,6 +122,8 @@ BASE_CSS = """
     .glass-card:hover { transform: translateY(-8px); border-color: rgba(251, 191, 36, 0.3); }
     .glass-card:hover::before { opacity: 1; }
     .card-icon { width: 50px; height: 50px; background: rgba(59, 130, 246, 0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 20px; border: 1px solid var(--glass-border); }
+    
+    /* Dashboard Layout */
     .dash-container { display: flex; min-height: 100vh; }
     .sidebar { width: 260px; background: var(--bg-2); padding: 30px 0; border-right: 1px solid var(--glass-border); position: fixed; height: 100vh; }
     .sidebar-item { display: block; padding: 15px 30px; color: #94a3b8; text-decoration: none; font-weight: 500; transition: 0.2s; border-left: 3px solid transparent; }
@@ -126,6 +143,17 @@ BASE_CSS = """
     input:checked + .slider:before { transform: translateX(22px); background: var(--gold); }
     .stat-card { background: var(--card); backdrop-filter: blur(16px); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border); text-align: center; }
     .alert { background: rgba(251, 191, 36, 0.1); padding: 15px; border-radius: 8px; border: 1px solid var(--gold); margin-bottom: 20px; color: var(--gold); }
+    
+    /* NEW: Moderation Logs Table */
+    .mod-log-item { display: flex; align-items: center; gap: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--blue); animation: fadeInUp 0.5s ease; }
+    .mod-log-item.ban { border-left-color: var(--red); }
+    .mod-log-item.mute { border-left-color: var(--gold); }
+    .mod-log-icon { font-size: 1.5rem; }
+    .mod-log-text { flex-grow: 1; }
+    .mod-log-user { color: #fff; font-weight: 600; }
+    .mod-log-reason { color: #94a3b8; font-size: 0.9rem; }
+    .mod-log-action { font-weight: 800; text-transform: uppercase; font-size: 0.8rem; padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,0.1); }
+    .empty-state { text-align: center; color: #64748b; padding: 20px; font-style: italic; }
 </style>
 """
 
@@ -203,10 +231,32 @@ DASH_HTML = BASE_CSS + """
                 </div>
             </div>
             {% if saved %}<div class="alert animate-up">✅ Settings saved! The bot will update within 60 seconds.</div>{% endif %}
+            
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; margin-bottom: 30px;">
                 <div class="stat-card animate-up d-1"><h2 style="color: var(--blue); margin-bottom: 5px;">{{ stats.servers }}</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Servers</p></div>
                 <div class="stat-card animate-up d-2"><h2 style="color: var(--gold); margin-bottom: 5px;">{{ stats.users }}</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Users</p></div>
             </div>
+
+            <div class="settings-card animate-up d-1">
+                <h3 style="color: #fff; margin-bottom: 20px;">📜 Recent Moderation Actions</h3>
+                {% if mod_logs %}
+                    {% for log in mod_logs %}
+                    <div class="mod-log-item {{ log.action }}">
+                        <div class="mod-log-icon">
+                            {% if log.action == 'ban' %}🔨{% elif log.action == 'mute' %}⏳{% elif log.action == 'kick' %}👢{% else %}⚠️{% endif %}
+                        </div>
+                        <div class="mod-log-text">
+                            <div class="mod-log-user">{{ log.user }} <span style="color:#64748b; font-weight:400;">was {{ log.action }}ed by {{ log.moderator }}</span></div>
+                            <div class="mod-log-reason">Reason: {{ log.reason }}</div>
+                        </div>
+                        <div class="mod-log-action">{{ log.action }}</div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">No recent moderation actions found. Make sure the bot is logging to MongoDB!</div>
+                {% endif %}
+            </div>
+
             <form action="/save_settings" method="POST">
                 <div class="settings-card animate-up d-1">
                     <h3 style="color: #fff; margin-bottom: 20px;">⚙️ General Configuration</h3>
@@ -257,8 +307,9 @@ def dashboard():
     
     stats = get_live_stats()
     settings = get_user_settings()
+    mod_logs = get_recent_mod_actions()
     saved = request.args.get('saved', False)
-    return render_template_string(DASH_HTML, user=user, settings=settings, stats=stats, saved=saved)
+    return render_template_string(DASH_HTML, user=user, settings=settings, stats=stats, saved=saved, mod_logs=mod_logs)
 
 @app.route("/save_settings", methods=['POST'])
 def save_settings():

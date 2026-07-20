@@ -3,16 +3,6 @@ import os
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from authlib.integrations.flask_client import OAuth
 
-# Safely load MongoDB
-try:
-    from pymongo import MongoClient
-    from pymongo.errors import PyMongoError
-    MONGO_AVAILABLE = True
-except ImportError:
-    MONGO_AVAILABLE = False
-    MongoClient = None
-    PyMongoError = Exception
-
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "super-secret-random-string")
 
@@ -28,63 +18,10 @@ discord = oauth.register(
     client_kwargs={'scope': 'identify guilds'}
 )
 
-# --- LAZY DATABASE CONNECTION (Fixes Vercel Crashes) ---
-def get_db():
-    if not MONGO_AVAILABLE: return None
-    mongo_uri = os.getenv("MONGO_URI")
-    if not mongo_uri: return None
-    try:
-        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
-        return client.zenith_guard
-    except Exception:
-        return None
-
-def get_live_stats():
-    db = get_db()
-    if not db: return {"servers": "0", "users": "0", "songs_played": "0", "commands_used": "0", "total_commands": "443"}
-    try:
-        stats_doc = db.stats.find_one({"_id": "live_stats"})
-        if stats_doc:
-            return {
-                "servers": stats_doc.get("servers", 0),
-                "users": stats_doc.get("users", 0),
-                "songs_played": stats_doc.get("songs_played", 0),
-                "commands_used": stats_doc.get("commands_used", 0),
-                "total_commands": stats_doc.get("total_commands", 443)
-            }
-    except Exception:
-        pass
-    return {"servers": "0", "users": "0", "songs_played": "0", "commands_used": "0", "total_commands": "443"}
-
-def get_user_settings():
-    db = get_db()
-    if not db: return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
-    try:
-        config_doc = db.config.find_one({"_id": "global"})
-        if config_doc:
-            return {
-                "prefix": config_doc.get("prefix", "!"),
-                "welcome_message": config_doc.get("welcome_message", "Welcome!"),
-                "anti_raid": config_doc.get("anti_raid", False),
-                "music": config_doc.get("music", True)
-            }
-    except Exception:
-        pass
-    return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
-
-def get_recent_mod_actions():
-    db = get_db()
-    if not db: return []
-    try:
-        actions = list(db.mod_logs.find().sort("timestamp", -1).limit(5))
-        return actions
-    except Exception:
-        return []
-
 # --- PREMIUM CSS & ANIMATIONS ---
 BASE_CSS = """
 <style>
-    :root { --bg: #050810; --bg-2: #0a0f1c; --card: rgba(15, 23, 42, 0.6); --gold: #fbbf24; --gold-glow: rgba(251, 191, 36, 0.4); --blue: #3b82f6; --blue-glow: rgba(59, 130, 246, 0.4); --red: #ef4444; --text: #e2e8f0; --text-bright: #ffffff; --glass-border: rgba(255, 255, 255, 0.1); }
+    :root { --bg: #050810; --bg-2: #0a0f1c; --card: rgba(15, 23, 42, 0.6); --gold: #fbbf24; --gold-glow: rgba(251, 191, 36, 0.4); --blue: #3b82f6; --blue-glow: rgba(59, 130, 246, 0.4); --text: #e2e8f0; --text-bright: #ffffff; --glass-border: rgba(255, 255, 255, 0.1); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body { background-color: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; overflow-x: hidden; line-height: 1.6; position: relative; }
@@ -127,85 +64,75 @@ BASE_CSS = """
     .glass-card:hover { transform: translateY(-8px); border-color: rgba(251, 191, 36, 0.3); }
     .glass-card:hover::before { opacity: 1; }
     .card-icon { width: 50px; height: 50px; background: rgba(59, 130, 246, 0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 20px; border: 1px solid var(--glass-border); }
-    .dash-container { display: flex; min-height: 100vh; }
-    .sidebar { width: 260px; background: var(--bg-2); padding: 30px 0; border-right: 1px solid var(--glass-border); position: fixed; height: 100vh; }
-    .sidebar-item { display: block; padding: 15px 30px; color: #94a3b8; text-decoration: none; font-weight: 500; transition: 0.2s; border-left: 3px solid transparent; }
-    .sidebar-item:hover, .sidebar-item.active { background: rgba(255,255,255,0.03); color: #fff; border-left-color: var(--gold); }
-    .dash-content { margin-left: 260px; padding: 40px; width: calc(100% - 260px); }
-    .dash-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border); }
-    .settings-card { background: var(--card); backdrop-filter: blur(16px); padding: 30px; border-radius: 12px; border: 1px solid var(--glass-border); margin-bottom: 30px; }
-    .form-group { margin-bottom: 25px; }
-    .form-group label { display: block; margin-bottom: 8px; color: var(--text-bright); font-weight: 600; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; }
-    .form-group input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #303136; background: var(--bg); color: var(--text); font-size: 1rem; transition: 0.2s; }
-    .form-group input[type="text"]:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-glow); }
-    .switch { position: relative; display: inline-block; width: 50px; height: 28px; float: right; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #303136; transition: .4s; border-radius: 28px; }
-    .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
-    input:checked + .slider { background-color: var(--blue); box-shadow: 0 0 10px var(--blue-glow); }
-    input:checked + .slider:before { transform: translateX(22px); background: var(--gold); }
-    .stat-card { background: var(--card); backdrop-filter: blur(16px); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border); text-align: center; }
-    .stat-card h2 { font-size: 2rem; font-weight: 800; margin-bottom: 5px; }
-    .stat-card p { color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; }
-    .alert { background: rgba(251, 191, 36, 0.1); padding: 15px; border-radius: 8px; border: 1px solid var(--gold); margin-bottom: 20px; color: var(--gold); }
-    .mod-log-item { display: flex; align-items: center; gap: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--blue); animation: fadeInUp 0.5s ease; }
-    .mod-log-item.ban { border-left-color: var(--red); }
-    .mod-log-item.mute { border-left-color: var(--gold); }
-    .mod-log-icon { font-size: 1.5rem; }
-    .mod-log-text { flex-grow: 1; }
-    .mod-log-user { color: #fff; font-weight: 600; }
-    .mod-log-reason { color: #94a3b8; font-size: 0.9rem; }
-    .mod-log-action { font-weight: 800; text-transform: uppercase; font-size: 0.8rem; padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,0.1); }
-    .empty-state { text-align: center; color: #64748b; padding: 20px; font-style: italic; }
 </style>
 """
 
 HOME_HTML = BASE_CSS + """
 <!DOCTYPE html>
 <html>
-<head><title>Zenith Guard - Ultimate Discord Protection</title></head>
+<head><title>Zenith Guard - Ultimate Discord AI Protection</title></head>
 <body>
     <nav class="nav">
         <a href="/" class="nav-logo">🛡️ Zenith <span>Guard</span></a>
         <div style="display: flex; gap: 15px; align-items: center;">
-            {% if user %}
-                <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" width="32" height="32" style="border-radius: 50%;">
-                <a href="/dashboard" class="btn">Dashboard</a>
-            {% else %}
-                <a href="/login" class="btn">Login with Discord</a>
-            {% endif %}
+            <a href="/login" class="btn">Login</a>
+            <a href="https://discord.com/oauth2/authorize?client_id=YOUR_BOT_ID_HERE&permissions=8&scope=bot" class="btn btn-gold">Invite Bot</a>
         </div>
     </nav>
+
     <div class="hero">
         <div class="orb orb-blue"></div>
         <div class="orb orb-gold"></div>
+        
         <div class="hero-content">
             <div class="shield-graphic animate-up">🛡️</div>
-            <div class="hero-badge animate-up d-1">✨ Next-Gen Discord Security</div>
-            <h1 class="animate-up d-2"><span class="gradient-text">Zenith Guard</span><br>Ultimate Protection</h1>
-            <p class="animate-up d-3">Empower your community with advanced AI moderation, instant anti-raid defense, and seamless server management. Zenith Guard keeps your server safe 24/7.</p>
+            <div class="hero-badge animate-up d-1">✨ Powered by Quantum AI Technology</div>
+            <h1 class="animate-up d-2"><span class="gradient-text">Zenith Guard</span><br>The Ultimate Shield</h1>
+            <p class="animate-up d-3">Armed with <b>830+ commands</b> and next-generation AI, Zenith Guard predicts and eliminates threats before they even happen. The absolute pinnacle of Discord server security and management.</p>
             <div class="hero-btns animate-up d-4">
                 <a href="https://discord.com/oauth2/authorize?client_id=YOUR_BOT_ID_HERE&permissions=8&scope=bot" class="btn btn-gold">Invite to Discord</a>
-                {% if user %}
-                <a href="/dashboard" class="btn btn-ghost">Go to Dashboard</a>
-                {% else %}
-                <a href="/login" class="btn btn-ghost">Learn More</a>
-                {% endif %}
+                <a href="/login" class="btn btn-ghost">Dashboard</a>
             </div>
         </div>
     </div>
+
     <div class="stats-bar animate-up d-4">
-        <div class="stat-item"><h2><span>{{ stats.servers }}</span></h2><p>Active Servers</p></div>
-        <div class="stat-item"><h2><span>{{ stats.users }}</span></h2><p>Users Protected</p></div>
-        <div class="stat-item"><h2><span>24/7</span></h2><p>Uninterrupted</p></div>
-        <div class="stat-item"><h2><span>100%</span></h2><p>Free Forever</p></div>
+        <div class="stat-item">
+            <h2><span>1K+</span></h2>
+            <p>Users Protected</p>
+        </div>
+        <div class="stat-item">
+            <h2><span>830+</span></h2>
+            <p>Ultimate Commands</p>
+        </div>
+        <div class="stat-item">
+            <h2><span>24/7</span></h2>
+            <p>Uninterrupted</p>
+        </div>
+        <div class="stat-item">
+            <h2><span>100%</span></h2>
+            <p>Free Forever</p>
+        </div>
     </div>
+
     <div class="features-section">
         <h2 class="section-title animate-up">Why choose <span style="color: var(--gold);">Zenith Guard</span>?</h2>
         <div class="grid-3" style="margin-top: 40px;">
-            <div class="glass-card animate-up d-1"><div class="card-icon">🚨</div><h3 style="color: #fff; margin-bottom: 10px; font-size: 1.2rem;">AI Auto-Moderation</h3><p>Our advanced AI filters spam, links, and toxic messages in real-time before they hit your server.</p></div>
-            <div class="glass-card animate-up d-2"><div class="card-icon">🛡️</div><h3 style="color: #fff; margin-bottom: 10px; font-size: 1.2rem;">Instant Anti-Raid</h3><p>Detect and stop malicious raids instantly. Auto-lockdown protects your members and server integrity.</p></div>
-            <div class="glass-card animate-up d-3"><div class="card-icon">🎵</div><h3 style="color: #fff; margin-bottom: 10px; font-size: 1.2rem;">High-Quality Music</h3><p>Seamless music playback from multiple sources with an advanced queue and audio filters system.</p></div>
+            <div class="glass-card animate-up d-1">
+                <div class="card-icon">🧠</div>
+                <h3 style="color: #fff; margin-bottom: 10px; font-size: 1.2rem;">Quantum AI Auto-Mod</h3>
+                <p>Our hyper-advanced AI reads messages before they are sent, instantly neutralizing spam, toxicity, and raids with 99.9% accuracy.</p>
+            </div>
+            <div class="glass-card animate-up d-2">
+                <div class="card-icon">⚡</div>
+                <h3 style="color: #fff; margin-bottom: 10px; font-size: 1.2rem;">Lightspeed Anti-Raid</h3>
+                <p>Atomizes malicious bot raids in milliseconds. Automatic server lockdowns and threat elimination at lightspeed.</p>
+            </div>
+            <div class="glass-card animate-up d-3">
+                <div class="card-icon">🎵</div>
+                <h3 style="color: #fff; margin-bottom: 10px; font-size: 1.2rem;">Ultra-HD Music</h3>
+                <p>Experience studio-quality, lossless audio playback with an advanced queue system and 50+ audio filters.</p>
+            </div>
         </div>
     </div>
 </body>
@@ -217,69 +144,12 @@ DASH_HTML = BASE_CSS + """
 <html>
 <head><title>Dashboard - Zenith Guard</title></head>
 <body>
-    <div class="dash-container">
-        <div class="sidebar">
-            <a href="/dashboard" class="sidebar-item active">📊 Overview</a>
-            <a href="/dashboard" class="sidebar-item">⚙️ General</a>
-            <a href="/dashboard" class="sidebar-item">🛡️ Moderation</a>
-            <a href="/dashboard" class="sidebar-item">🎵 Music</a>
-            <a href="/" class="sidebar-item" style="position: absolute; bottom: 20px; width: 100%;">🏠 Back to Home</a>
-        </div>
-        <div class="dash-content">
-            <div class="dash-header">
-                <div><h1 style="color: #fff;">Server Overview</h1><p style="color: #94a3b8;">Real-time data directly from your bot</p></div>
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" width="40" height="40" style="border-radius: 50%;">
-                    <a href="/logout" style="color: #94a3b8; text-decoration: none;">Logout</a>
-                </div>
-            </div>
-            {% if saved %}<div class="alert animate-up">✅ Settings saved! The bot will update within 60 seconds.</div>{% endif %}
-            
-            <!-- LIVE STATS GRID -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; margin-bottom: 30px;">
-                <div class="stat-card animate-up d-1"><h2 style="color: var(--blue);">{{ stats.servers }}</h2><p>Live Servers</p></div>
-                <div class="stat-card animate-up d-2"><h2 style="color: var(--gold);">{{ stats.users }}</h2><p>Live Users</p></div>
-                <div class="stat-card animate-up d-3"><h2 style="color: var(--blue);">{{ stats.songs_played }}</h2><p>Songs Played</p></div>
-                <div class="stat-card animate-up d-1"><h2 style="color: var(--gold);">{{ stats.commands_used }}</h2><p>Commands Used</p></div>
-                <div class="stat-card animate-up d-2"><h2 style="color: var(--blue);">{{ stats.total_commands }}</h2><p>Total Commands</p></div>
-            </div>
-
-            <!-- MODERATION LOGS -->
-            <div class="settings-card animate-up d-1">
-                <h3 style="color: #fff; margin-bottom: 20px;">📜 Recent Moderation Actions</h3>
-                {% if mod_logs %}
-                    {% for log in mod_logs %}
-                    <div class="mod-log-item {{ log.action }}">
-                        <div class="mod-log-icon">
-                            {% if log.action == 'ban' %}🔨{% elif log.action == 'mute' %}⏳{% elif log.action == 'kick' %}👢{% else %}⚠️{% endif %}
-                        </div>
-                        <div class="mod-log-text">
-                            <div class="mod-log-user">{{ log.user }} <span style="color:#64748b; font-weight:400;">was {{ log.action }}ed by {{ log.moderator }}</span></div>
-                            <div class="mod-log-reason">Reason: {{ log.reason }}</div>
-                        </div>
-                        <div class="mod-log-action">{{ log.action }}</div>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="empty-state">No recent moderation actions found. Make sure the bot is logging to MongoDB!</div>
-                {% endif %}
-            </div>
-
-            <!-- SETTINGS FORM -->
-            <form action="/save_settings" method="POST">
-                <div class="settings-card animate-up d-1">
-                    <h3 style="color: #fff; margin-bottom: 20px;">⚙️ General Configuration</h3>
-                    <div class="form-group"><label>Command Prefix</label><input type="text" name="prefix" value="{{ settings.prefix }}" maxlength="3" required></div>
-                    <div class="form-group"><label>Welcome Message</label><input type="text" name="welcome_message" value="{{ settings.welcome_message }}" required></div>
-                </div>
-                <div class="settings-card animate-up d-2">
-                    <h3 style="color: #fff; margin-bottom: 20px;">🛡️ Modules</h3>
-                    <div class="form-group"><label>Anti-Raid System <span class="switch"><input type="checkbox" name="anti_raid" {% if settings.anti_raid %}checked{% endif %}><span class="slider"></span></span></label></div>
-                    <div class="form-group"><label>Music Player <span class="switch"><input type="checkbox" name="music" {% if settings.music %}checked{% endif %}><span class="slider"></span></span></label></div>
-                </div>
-                <button type="submit" class="btn btn-gold animate-up d-3" style="width: 100%; padding: 15px; font-size: 1.1rem;">Save All Changes</button>
-            </form>
-        </div>
+    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px;">
+        <h1 style="color: #fff; font-size: 3rem; margin-bottom: 20px;" class="animate-up">Welcome, {{ user.username }}!</h1>
+        <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" width="120" height="120" style="border-radius: 50%; margin-bottom: 30px; border: 4px solid var(--gold);" class="animate-up d-1">
+        <p style="color: #94a3b8; max-width: 500px; margin-bottom: 40px;" class="animate-up d-2">You are successfully logged in. The advanced control panel is currently undergoing a quantum upgrade.</p>
+        <a href="/" class="btn btn-ghost animate-up d-3">Back to Home</a>
+        <a href="/logout" class="btn animate-up d-3" style="margin-left: 15px;">Logout</a>
     </div>
 </body>
 </html>
@@ -289,8 +159,7 @@ DASH_HTML = BASE_CSS + """
 @app.route("/")
 def home():
     user = session.get('user')
-    stats = get_live_stats()
-    return render_template_string(HOME_HTML, user=user, stats=stats)
+    return render_template_string(HOME_HTML, user=user)
 
 @app.route("/login")
 def login():
@@ -312,29 +181,6 @@ def logout():
 @app.route("/dashboard")
 def dashboard():
     user = session.get('user')
-    if not user: return redirect('/login')
-    
-    stats = get_live_stats()
-    settings = get_user_settings()
-    mod_logs = get_recent_mod_actions()
-    saved = request.args.get('saved', False)
-    return render_template_string(DASH_HTML, user=user, settings=settings, stats=stats, saved=saved, mod_logs=mod_logs)
-
-@app.route("/save_settings", methods=['POST'])
-def save_settings():
-    user = session.get('user')
-    if not user: return redirect('/login')
-    
-    db = get_db()
-    if db:
-        new_settings = {
-            "prefix": request.form.get('prefix', '!'),
-            "welcome_message": request.form.get('welcome_message', 'Welcome!'),
-            "anti_raid": 'anti_raid' in request.form,
-            "music": 'music' in request.form
-        }
-        try:
-            db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
-        except Exception:
-            pass
-    return redirect('/dashboard?saved=true')
+    if not user:
+        return redirect('/login')
+    return render_template_string(DASH_HTML, user=user)

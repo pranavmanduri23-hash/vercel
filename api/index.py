@@ -3,6 +3,16 @@ import os
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from authlib.integrations.flask_client import OAuth
 
+# Safely load MongoDB
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import PyMongoError
+    MONGO_AVAILABLE = True
+except ImportError:
+    MONGO_AVAILABLE = False
+    MongoClient = None
+    PyMongoError = Exception
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "super-secret-random-string")
 
@@ -18,19 +28,58 @@ discord = oauth.register(
     client_kwargs={'scope': 'identify guilds'}
 )
 
-# --- SAMPLE DATA (Replaced pymongo to fix Vercel Crashes) ---
+# --- LAZY DATABASE CONNECTION (Fixes Vercel Crashes) ---
+def get_db():
+    if not MONGO_AVAILABLE: return None
+    mongo_uri = os.getenv("MONGO_URI")
+    if not mongo_uri: return None
+    try:
+        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
+        return client.zenith_guard
+    except Exception:
+        return None
+
 def get_live_stats():
-    return {"servers": "6", "users": "660"}
+    db = get_db()
+    if not db: return {"servers": "0", "users": "0", "songs_played": "0", "commands_used": "0", "total_commands": "443"}
+    try:
+        stats_doc = db.stats.find_one({"_id": "live_stats"})
+        if stats_doc:
+            return {
+                "servers": stats_doc.get("servers", 0),
+                "users": stats_doc.get("users", 0),
+                "songs_played": stats_doc.get("songs_played", 0),
+                "commands_used": stats_doc.get("commands_used", 0),
+                "total_commands": stats_doc.get("total_commands", 443)
+            }
+    except Exception:
+        pass
+    return {"servers": "0", "users": "0", "songs_played": "0", "commands_used": "0", "total_commands": "443"}
 
 def get_user_settings():
+    db = get_db()
+    if not db: return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
+    try:
+        config_doc = db.config.find_one({"_id": "global"})
+        if config_doc:
+            return {
+                "prefix": config_doc.get("prefix", "!"),
+                "welcome_message": config_doc.get("welcome_message", "Welcome!"),
+                "anti_raid": config_doc.get("anti_raid", False),
+                "music": config_doc.get("music", True)
+            }
+    except Exception:
+        pass
     return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
 
 def get_recent_mod_actions():
-    return [
-        {"user": "RaidBot#9999", "moderator": "Zenith Guard", "action": "ban", "reason": "Anti-Raid Protection Triggered"},
-        {"user": "Spammer#1234", "moderator": "AutoMod", "action": "mute", "reason": "Excessive Caps Spam"},
-        {"user": "ToxicUser#5678", "moderator": "Admin#0001", "action": "kick", "reason": "Inappropriate Language"}
-    ]
+    db = get_db()
+    if not db: return []
+    try:
+        actions = list(db.mod_logs.find().sort("timestamp", -1).limit(5))
+        return actions
+    except Exception:
+        return []
 
 # --- PREMIUM CSS & ANIMATIONS ---
 BASE_CSS = """
@@ -96,6 +145,8 @@ BASE_CSS = """
     input:checked + .slider { background-color: var(--blue); box-shadow: 0 0 10px var(--blue-glow); }
     input:checked + .slider:before { transform: translateX(22px); background: var(--gold); }
     .stat-card { background: var(--card); backdrop-filter: blur(16px); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border); text-align: center; }
+    .stat-card h2 { font-size: 2rem; font-weight: 800; margin-bottom: 5px; }
+    .stat-card p { color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; }
     .alert { background: rgba(251, 191, 36, 0.1); padding: 15px; border-radius: 8px; border: 1px solid var(--gold); margin-bottom: 20px; color: var(--gold); }
     .mod-log-item { display: flex; align-items: center; gap: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--blue); animation: fadeInUp 0.5s ease; }
     .mod-log-item.ban { border-left-color: var(--red); }
@@ -184,11 +235,16 @@ DASH_HTML = BASE_CSS + """
             </div>
             {% if saved %}<div class="alert animate-up">✅ Settings saved! The bot will update within 60 seconds.</div>{% endif %}
             
+            <!-- LIVE STATS GRID -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; margin-bottom: 30px;">
-                <div class="stat-card animate-up d-1"><h2 style="color: var(--blue); margin-bottom: 5px;">{{ stats.servers }}</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Servers</p></div>
-                <div class="stat-card animate-up d-2"><h2 style="color: var(--gold); margin-bottom: 5px;">{{ stats.users }}</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Users</p></div>
+                <div class="stat-card animate-up d-1"><h2 style="color: var(--blue);">{{ stats.servers }}</h2><p>Live Servers</p></div>
+                <div class="stat-card animate-up d-2"><h2 style="color: var(--gold);">{{ stats.users }}</h2><p>Live Users</p></div>
+                <div class="stat-card animate-up d-3"><h2 style="color: var(--blue);">{{ stats.songs_played }}</h2><p>Songs Played</p></div>
+                <div class="stat-card animate-up d-1"><h2 style="color: var(--gold);">{{ stats.commands_used }}</h2><p>Commands Used</p></div>
+                <div class="stat-card animate-up d-2"><h2 style="color: var(--blue);">{{ stats.total_commands }}</h2><p>Total Commands</p></div>
             </div>
 
+            <!-- MODERATION LOGS -->
             <div class="settings-card animate-up d-1">
                 <h3 style="color: #fff; margin-bottom: 20px;">📜 Recent Moderation Actions</h3>
                 {% if mod_logs %}
@@ -209,6 +265,7 @@ DASH_HTML = BASE_CSS + """
                 {% endif %}
             </div>
 
+            <!-- SETTINGS FORM -->
             <form action="/save_settings" method="POST">
                 <div class="settings-card animate-up d-1">
                     <h3 style="color: #fff; margin-bottom: 20px;">⚙️ General Configuration</h3>
@@ -267,4 +324,17 @@ def dashboard():
 def save_settings():
     user = session.get('user')
     if not user: return redirect('/login')
+    
+    db = get_db()
+    if db:
+        new_settings = {
+            "prefix": request.form.get('prefix', '!'),
+            "welcome_message": request.form.get('welcome_message', 'Welcome!'),
+            "anti_raid": 'anti_raid' in request.form,
+            "music": 'music' in request.form
+        }
+        try:
+            db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
+        except Exception:
+            pass
     return redirect('/dashboard?saved=true')

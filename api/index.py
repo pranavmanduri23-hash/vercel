@@ -2,6 +2,8 @@
 import os
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from authlib.integrations.flask_client import OAuth
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "super-secret-random-string")
@@ -17,6 +19,47 @@ discord = oauth.register(
     api_base_url='https://discord.com/api/',
     client_kwargs={'scope': 'identify guilds'}
 )
+
+# Safe MongoDB Connection
+mongo_client = None
+mongo_uri = os.getenv("MONGO_URI")
+if mongo_uri:
+    try:
+        mongo_client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+    except Exception:
+        mongo_client = None
+
+def get_db():
+    if mongo_client:
+        return mongo_client.zenith_guard
+    return None
+
+def get_live_stats():
+    db = get_db()
+    if not db: return {"servers": "0", "users": "0"}
+    try:
+        stats_doc = db.stats.find_one({"_id": "live_stats"})
+        if stats_doc:
+            return {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
+    except Exception:
+        pass
+    return {"servers": "0", "users": "0"}
+
+def get_user_settings():
+    db = get_db()
+    if not db: return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
+    try:
+        config_doc = db.config.find_one({"_id": "global"})
+        if config_doc:
+            return {
+                "prefix": config_doc.get("prefix", "!"),
+                "welcome_message": config_doc.get("welcome_message", "Welcome!"),
+                "anti_raid": config_doc.get("anti_raid", False),
+                "music": config_doc.get("music", True)
+            }
+    except Exception:
+        pass
+    return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
 
 # --- PREMIUM CSS & ANIMATIONS ---
 BASE_CSS = """
@@ -121,8 +164,8 @@ HOME_HTML = BASE_CSS + """
         </div>
     </div>
     <div class="stats-bar animate-up d-4">
-        <div class="stat-item"><h2><span>0</span></h2><p>Active Servers</p></div>
-        <div class="stat-item"><h2><span>0</span></h2><p>Users Protected</p></div>
+        <div class="stat-item"><h2><span>{{ stats.servers }}</span></h2><p>Active Servers</p></div>
+        <div class="stat-item"><h2><span>{{ stats.users }}</span></h2><p>Users Protected</p></div>
         <div class="stat-item"><h2><span>24/7</span></h2><p>Uninterrupted</p></div>
         <div class="stat-item"><h2><span>100%</span></h2><p>Free Forever</p></div>
     </div>
@@ -159,20 +202,21 @@ DASH_HTML = BASE_CSS + """
                     <a href="/logout" style="color: #94a3b8; text-decoration: none;">Logout</a>
                 </div>
             </div>
+            {% if saved %}<div class="alert animate-up">✅ Settings saved! The bot will update within 60 seconds.</div>{% endif %}
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; margin-bottom: 30px;">
-                <div class="stat-card animate-up d-1"><h2 style="color: var(--blue); margin-bottom: 5px;">0</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Servers</p></div>
-                <div class="stat-card animate-up d-2"><h2 style="color: var(--gold); margin-bottom: 5px;">0</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Users</p></div>
+                <div class="stat-card animate-up d-1"><h2 style="color: var(--blue); margin-bottom: 5px;">{{ stats.servers }}</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Servers</p></div>
+                <div class="stat-card animate-up d-2"><h2 style="color: var(--gold); margin-bottom: 5px;">{{ stats.users }}</h2><p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Users</p></div>
             </div>
             <form action="/save_settings" method="POST">
                 <div class="settings-card animate-up d-1">
                     <h3 style="color: #fff; margin-bottom: 20px;">⚙️ General Configuration</h3>
-                    <div class="form-group"><label>Command Prefix</label><input type="text" name="prefix" value="!" maxlength="3" required></div>
-                    <div class="form-group"><label>Welcome Message</label><input type="text" name="welcome_message" value="Welcome {user}!" required></div>
+                    <div class="form-group"><label>Command Prefix</label><input type="text" name="prefix" value="{{ settings.prefix }}" maxlength="3" required></div>
+                    <div class="form-group"><label>Welcome Message</label><input type="text" name="welcome_message" value="{{ settings.welcome_message }}" required></div>
                 </div>
                 <div class="settings-card animate-up d-2">
                     <h3 style="color: #fff; margin-bottom: 20px;">🛡️ Modules</h3>
-                    <div class="form-group"><label>Anti-Raid System <span class="switch"><input type="checkbox" name="anti_raid"><span class="slider"></span></span></label></div>
-                    <div class="form-group"><label>Music Player <span class="switch"><input type="checkbox" name="music" checked><span class="slider"></span></span></label></div>
+                    <div class="form-group"><label>Anti-Raid System <span class="switch"><input type="checkbox" name="anti_raid" {% if settings.anti_raid %}checked{% endif %}><span class="slider"></span></span></label></div>
+                    <div class="form-group"><label>Music Player <span class="switch"><input type="checkbox" name="music" {% if settings.music %}checked{% endif %}><span class="slider"></span></span></label></div>
                 </div>
                 <button type="submit" class="btn btn-gold animate-up d-3" style="width: 100%; padding: 15px; font-size: 1.1rem;">Save All Changes</button>
             </form>
@@ -186,7 +230,8 @@ DASH_HTML = BASE_CSS + """
 @app.route("/")
 def home():
     user = session.get('user')
-    return render_template_string(HOME_HTML, user=user)
+    stats = get_live_stats()
+    return render_template_string(HOME_HTML, user=user, stats=stats)
 
 @app.route("/login")
 def login():
@@ -208,12 +253,28 @@ def logout():
 @app.route("/dashboard")
 def dashboard():
     user = session.get('user')
-    if not user:
-        return redirect('/login')
-    return render_template_string(DASH_HTML, user=user)
+    if not user: return redirect('/login')
+    
+    stats = get_live_stats()
+    settings = get_user_settings()
+    saved = request.args.get('saved', False)
+    return render_template_string(DASH_HTML, user=user, settings=settings, stats=stats, saved=saved)
 
 @app.route("/save_settings", methods=['POST'])
 def save_settings():
-    if not session.get('user'):
-        return redirect('/login')
+    user = session.get('user')
+    if not user: return redirect('/login')
+    
+    db = get_db()
+    if db:
+        new_settings = {
+            "prefix": request.form.get('prefix', '!'),
+            "welcome_message": request.form.get('welcome_message', 'Welcome!'),
+            "anti_raid": 'anti_raid' in request.form,
+            "music": 'music' in request.form
+        }
+        try:
+            db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
+        except Exception:
+            pass
     return redirect('/dashboard?saved=true')

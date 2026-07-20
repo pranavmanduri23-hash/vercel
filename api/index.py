@@ -18,101 +18,105 @@ discord = oauth.register(
     client_kwargs={'scope': 'identify guilds'}
 )
 
-# Connect to MongoDB
+# Connect to MongoDB safely
 def get_db():
-    client = MongoClient(os.getenv("MONGO_URI"))
+    mongo_uri = os.getenv("MONGO_URI")
+    if not mongo_uri:
+        return None
+    client = MongoClient(mongo_uri)
     return client.zenith_guard
 
-# --- PREMIUM CSS & ANIMATIONS ---
+# --- PREMIUM BLUE / WHITE / GOLD CSS ---
 BASE_CSS = """
 <style>
-    :root { --bg: #06070a; --card: rgba(20, 22, 27, 0.6); --accent: #5865F2; --accent-glow: rgba(88, 101, 242, 0.4); --text: #dcddde; --text-bright: #ffffff; --glass-border: rgba(255, 255, 255, 0.08); }
+    :root { --bg: #050810; --bg-2: #0a0f1c; --card: rgba(15, 23, 42, 0.6); --gold: #fbbf24; --gold-glow: rgba(251, 191, 36, 0.4); --blue: #3b82f6; --blue-glow: rgba(59, 130, 246, 0.4); --text: #e2e8f0; --text-bright: #ffffff; --glass-border: rgba(255, 255, 255, 0.1); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
-    body { background-color: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; overflow-x: hidden; line-height: 1.6; }
+    body { background-color: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; overflow-x: hidden; line-height: 1.6; position: relative; }
+    
+    /* Tech Grid Background */
+    body::before { content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-image: linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px); background-size: 40px 40px; z-index: -2; pointer-events: none; }
     
     /* Keyframes */
-    @keyframes fadeInUp { from { opacity: 0; transform: translate3d(0, 60px, 0); } to { opacity: 1; transform: none; } }
+    @keyframes fadeInUp { from { opacity: 0; transform: translate3d(0, 60px, 0) scale(0.95); } to { opacity: 1; transform: none; } }
     @keyframes float { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-20px) rotate(5deg); } }
-    @keyframes pulseGlow { 0%, 100% { box-shadow: 0 0 30px var(--accent-glow); } 50% { box-shadow: 0 0 60px var(--accent-glow); } }
-    @keyframes textGradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
-    @keyframes spinSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
+    @keyframes glowPulse { 0%, 100% { box-shadow: 0 0 30px var(--blue-glow); } 50% { box-shadow: 0 0 60px var(--gold-glow); } }
     
     .animate-up { animation: fadeInUp 1s cubic-bezier(0.16, 1, 0.3, 1) both; }
     .d-1 { animation-delay: 0.2s; } .d-2 { animation-delay: 0.4s; } .d-3 { animation-delay: 0.6s; } .d-4 { animation-delay: 0.8s; }
 
     /* Navbar */
-    .nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 50px; background: rgba(6, 7, 10, 0.7); backdrop-filter: blur(16px); border-bottom: 1px solid var(--glass-border); position: fixed; width: 100%; top: 0; z-index: 1000; }
+    .nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 50px; background: rgba(5, 8, 16, 0.8); backdrop-filter: blur(16px); border-bottom: 1px solid var(--glass-border); position: fixed; width: 100%; top: 0; z-index: 1000; }
     .nav-logo { display: flex; align-items: center; gap: 10px; font-size: 1.3rem; font-weight: 800; color: var(--text-bright); text-decoration: none; letter-spacing: -0.5px; }
-    .btn { background: var(--accent); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; transition: 0.3s; display: inline-block; }
-    .btn:hover { background: #4752c4; transform: translateY(-3px); box-shadow: 0 10px 25px var(--accent-glow); }
+    .nav-logo span { color: var(--gold); }
+    .btn { background: var(--blue); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; transition: 0.3s; display: inline-block; }
+    .btn:hover { background: #2563eb; transform: translateY(-3px); box-shadow: 0 10px 25px var(--blue-glow); }
+    .btn-gold { background: linear-gradient(135deg, var(--gold), #f59e0b); color: #050810; font-weight: 800; }
+    .btn-gold:hover { box-shadow: 0 10px 25px var(--gold-glow); }
     .btn-ghost { background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #fff; }
     .btn-ghost:hover { background: rgba(255,255,255,0.1); box-shadow: none; }
 
     /* Hero Section */
     .hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; position: relative; text-align: center; padding: 100px 20px 0 20px; overflow: hidden; }
-    .hero-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; background: radial-gradient(circle at 50% 0%, #1a1c25 0%, var(--bg) 60%); }
-    .orb { position: absolute; border-radius: 50%; filter: blur(80px); z-index: -1; }
-    .orb-1 { width: 400px; height: 400px; background: rgba(88, 101, 242, 0.15); top: 10%; left: 10%; animation: float 8s ease-in-out infinite; }
-    .orb-2 { width: 300px; height: 300px; background: rgba(88, 101, 242, 0.1); bottom: 10%; right: 10%; animation: float 10s ease-in-out infinite reverse; }
+    .orb { position: absolute; border-radius: 50%; filter: blur(100px); z-index: -1; }
+    .orb-blue { width: 500px; height: 500px; background: rgba(59, 130, 246, 0.15); top: 10%; left: 10%; animation: float 8s ease-in-out infinite; }
+    .orb-gold { width: 400px; height: 400px; background: rgba(251, 191, 36, 0.1); bottom: 10%; right: 10%; animation: float 10s ease-in-out infinite reverse; }
     
     .hero-content { max-width: 800px; }
-    .hero-badge { display: inline-block; padding: 8px 16px; background: rgba(88, 101, 242, 0.1); border: 1px solid rgba(88, 101, 242, 0.3); border-radius: 20px; font-size: 0.9rem; color: #a3acff; margin-bottom: 24px; }
+    .hero-badge { display: inline-block; padding: 8px 16px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 20px; font-size: 0.9rem; color: var(--gold); margin-bottom: 24px; }
     .hero h1 { font-size: 4.5rem; font-weight: 800; color: var(--text-bright); margin-bottom: 24px; letter-spacing: -3px; line-height: 1.1; }
-    .gradient-text { background: linear-gradient(90deg, #ffffff, #5865F2, #8a93ff, #ffffff); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: textGradient 4s linear infinite; }
-    .hero p { font-size: 1.25rem; color: #8e9297; max-width: 600px; margin: 0 auto 40px auto; }
+    .gradient-text { background: linear-gradient(90deg, #ffffff, #3b82f6, #fbbf24, #ffffff); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shimmer 3s linear infinite; }
+    .hero p { font-size: 1.25rem; color: #94a3b8; max-width: 600px; margin: 0 auto 40px auto; }
     .hero-btns { display: flex; gap: 15px; justify-content: center; margin-bottom: 60px; }
-    
-    /* Decorative Graphic */
-    .shield-graphic { font-size: 8rem; margin-bottom: 40px; display: inline-block; animation: float 4s ease-in-out infinite; filter: drop-shadow(0 0 20px var(--accent-glow)); }
+    .shield-graphic { font-size: 6rem; margin-bottom: 40px; display: inline-block; animation: float 4s ease-in-out infinite; filter: drop-shadow(0 0 20px var(--blue-glow)); }
 
     /* Live Stats Bar */
-    .stats-bar { display: flex; justify-content: center; gap: 60px; padding: 40px 0; border-top: 1px solid var(--glass-border); border-bottom: 1px solid var(--glass-border); background: rgba(0,0,0,0.2); }
+    .stats-bar { display: flex; justify-content: center; gap: 60px; padding: 40px 0; border-top: 1px solid var(--glass-border); border-bottom: 1px solid var(--glass-border); background: rgba(0,0,0,0.3); backdrop-filter: blur(8px); }
     .stat-item h2 { font-size: 2.5rem; font-weight: 800; color: var(--text-bright); margin-bottom: 5px; }
-    .stat-item p { font-size: 0.9rem; color: #8e9297; letter-spacing: 1px; text-transform: uppercase; }
+    .stat-item h2 span { color: var(--gold); }
+    .stat-item p { font-size: 0.9rem; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; }
 
     /* Features */
     .features-section { padding: 100px 20px; max-width: 1200px; margin: 0 auto; }
     .section-title { text-align: center; font-size: 2.5rem; color: var(--text-bright); margin-bottom: 20px; font-weight: 800; }
-    .section-subtitle { text-align: center; color: #8e9297; margin-bottom: 60px; font-size: 1.1rem; }
     .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
     .glass-card { background: var(--card); backdrop-filter: blur(16px); border: 1px solid var(--glass-border); padding: 32px; border-radius: 16px; transition: 0.3s; position: relative; overflow: hidden; }
-    .glass-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0; transition: 0.3s; }
-    .glass-card:hover { transform: translateY(-8px); border-color: rgba(88, 101, 242, 0.3); background: rgba(20, 22, 27, 0.8); }
+    .glass-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); opacity: 0; transition: 0.3s; }
+    .glass-card:hover { transform: translateY(-8px); border-color: rgba(251, 191, 36, 0.3); }
     .glass-card:hover::before { opacity: 1; }
-    .card-icon { width: 50px; height: 50px; background: rgba(88, 101, 242, 0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 20px; }
+    .card-icon { width: 50px; height: 50px; background: rgba(59, 130, 246, 0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 20px; border: 1px solid var(--glass-border); }
     
     /* Dashboard Layout */
     .dash-container { display: flex; min-height: 100vh; }
-    .sidebar { width: 260px; background: #0a0b0e; padding: 30px 0; border-right: 1px solid var(--glass-border); position: fixed; height: 100vh; }
-    .sidebar-item { display: block; padding: 15px 30px; color: #8e9297; text-decoration: none; font-weight: 500; transition: 0.2s; border-left: 3px solid transparent; }
-    .sidebar-item:hover, .sidebar-item.active { background: rgba(255,255,255,0.03); color: #fff; border-left-color: var(--accent); }
+    .sidebar { width: 260px; background: var(--bg-2); padding: 30px 0; border-right: 1px solid var(--glass-border); position: fixed; height: 100vh; }
+    .sidebar-item { display: block; padding: 15px 30px; color: #94a3b8; text-decoration: none; font-weight: 500; transition: 0.2s; border-left: 3px solid transparent; }
+    .sidebar-item:hover, .sidebar-item.active { background: rgba(255,255,255,0.03); color: #fff; border-left-color: var(--gold); }
     .dash-content { margin-left: 260px; padding: 40px; width: calc(100% - 260px); }
     .dash-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border); }
     .settings-card { background: var(--card); backdrop-filter: blur(16px); padding: 30px; border-radius: 12px; border: 1px solid var(--glass-border); margin-bottom: 30px; }
     .form-group { margin-bottom: 25px; }
     .form-group label { display: block; margin-bottom: 8px; color: var(--text-bright); font-weight: 600; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; }
-    .form-group input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #303136; background: #0a0b0e; color: var(--text); font-size: 1rem; transition: 0.2s; }
-    .form-group input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    .form-group input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #303136; background: var(--bg); color: var(--text); font-size: 1rem; transition: 0.2s; }
+    .form-group input[type="text"]:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-glow); }
     .switch { position: relative; display: inline-block; width: 50px; height: 28px; float: right; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #303136; transition: .4s; border-radius: 28px; }
     .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
-    input:checked + .slider { background-color: var(--accent); }
-    input:checked + .slider:before { transform: translateX(22px); }
+    input:checked + .slider { background-color: var(--blue); box-shadow: 0 0 10px var(--blue-glow); }
+    input:checked + .slider:before { transform: translateX(22px); background: var(--gold); }
     .stat-card { background: var(--card); backdrop-filter: blur(16px); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border); text-align: center; }
-    .alert { background: rgba(88, 101, 242, 0.1); padding: 15px; border-radius: 8px; border: 1px solid rgba(88, 101, 242, 0.4); margin-bottom: 20px; color: #fff; }
+    .alert { background: rgba(251, 191, 36, 0.1); padding: 15px; border-radius: 8px; border: 1px solid var(--gold); margin-bottom: 20px; color: var(--gold); }
 </style>
 """
 
-# --- HTML TEMPLATES ---
 HOME_HTML = BASE_CSS + """
 <!DOCTYPE html>
 <html>
 <head><title>Zenith Guard - Ultimate Discord Protection</title></head>
 <body>
     <nav class="nav">
-        <a href="/" class="nav-logo">🛡️ Zenith Guard</a>
+        <a href="/" class="nav-logo">🛡️ Zenith <span>Guard</span></a>
         <div style="display: flex; gap: 15px; align-items: center;">
             {% if user %}
                 <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" width="32" height="32" style="border-radius: 50%;">
@@ -124,17 +128,16 @@ HOME_HTML = BASE_CSS + """
     </nav>
 
     <div class="hero">
-        <div class="hero-bg"></div>
-        <div class="orb orb-1"></div>
-        <div class="orb orb-2"></div>
+        <div class="orb orb-blue"></div>
+        <div class="orb orb-gold"></div>
         
         <div class="hero-content">
             <div class="shield-graphic animate-up">🛡️</div>
             <div class="hero-badge animate-up d-1">✨ Next-Gen Discord Security</div>
-            <h1 class="animate-up d-2"><span class="gradient-text">Protection that feels</span><br>impenetrable.</h1>
+            <h1 class="animate-up d-2"><span class="gradient-text">Zenith Guard</span><br>Ultimate Protection</h1>
             <p class="animate-up d-3">Empower your community with advanced AI moderation, instant anti-raid defense, and seamless server management. Zenith Guard keeps your server safe 24/7.</p>
             <div class="hero-btns animate-up d-4">
-                <a href="https://discord.com/oauth2/authorize?client_id=YOUR_BOT_ID_HERE&permissions=8&scope=bot" class="btn">Invite to Discord</a>
+                <a href="https://discord.com/oauth2/authorize?client_id=YOUR_BOT_ID_HERE&permissions=8&scope=bot" class="btn btn-gold">Invite to Discord</a>
                 {% if user %}
                 <a href="/dashboard" class="btn btn-ghost">Go to Dashboard</a>
                 {% else %}
@@ -146,28 +149,26 @@ HOME_HTML = BASE_CSS + """
 
     <div class="stats-bar animate-up d-4">
         <div class="stat-item">
-            <h2 id="stat-servers">{{ stats.servers }}+</h2>
+            <h2><span>{{ stats.servers }}</span></h2>
             <p>Active Servers</p>
         </div>
         <div class="stat-item">
-            <h2>{{ stats.users }}+</h2>
+            <h2><span>{{ stats.users }}</span></h2>
             <p>Users Protected</p>
         </div>
         <div class="stat-item">
-            <h2>24/7</h2>
+            <h2><span>24/7</span></h2>
             <p>Uninterrupted</p>
         </div>
         <div class="stat-item">
-            <h2>100%</h2>
+            <h2><span>100%</span></h2>
             <p>Free Forever</p>
         </div>
     </div>
 
     <div class="features-section">
-        <h2 class="section-title animate-up">Why choose Zenith Guard?</h2>
-        <p class="section-subtitle animate-up d-1">A complete all-in-one solution for your Discord server.</p>
-        
-        <div class="grid-3">
+        <h2 class="section-title animate-up">Why choose <span style="color: var(--gold);">Zenith Guard</span>?</h2>
+        <div class="grid-3" style="margin-top: 40px;">
             <div class="glass-card animate-up d-1">
                 <div class="card-icon">🚨</div>
                 <h3 style="color: #fff; margin-bottom: 10px; font-size: 1.2rem;">AI Auto-Moderation</h3>
@@ -206,24 +207,24 @@ DASH_HTML = BASE_CSS + """
             <div class="dash-header">
                 <div>
                     <h1 style="color: #fff;">Server Overview</h1>
-                    <p style="color: #8e9297;">Real-time data directly from your bot</p>
+                    <p style="color: #94a3b8;">Real-time data directly from your bot</p>
                 </div>
                 <div style="display: flex; align-items: center; gap: 15px;">
                     <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" width="40" height="40" style="border-radius: 50%;">
-                    <a href="/logout" style="color: #8e9297; text-decoration: none;">Logout</a>
+                    <a href="/logout" style="color: #94a3b8; text-decoration: none;">Logout</a>
                 </div>
             </div>
 
-            {% if saved %}<div class="alert animate-up">✅ Settings saved successfully to the database!</div>{% endif %}
+            {% if saved %}<div class="alert animate-up">✅ Settings saved! The bot will update within 60 seconds.</div>{% endif %}
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; margin-bottom: 30px;">
                 <div class="stat-card animate-up d-1">
-                    <h2 style="color: var(--accent); margin-bottom: 5px;">{{ stats.servers }}</h2>
-                    <p style="color: #8e9297; font-size: 0.9rem; text-transform: uppercase;">Live Servers</p>
+                    <h2 style="color: var(--blue); margin-bottom: 5px;">{{ stats.servers }}</h2>
+                    <p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Servers</p>
                 </div>
                 <div class="stat-card animate-up d-2">
-                    <h2 style="color: var(--accent); margin-bottom: 5px;">{{ stats.users }}</h2>
-                    <p style="color: #8e9297; font-size: 0.9rem; text-transform: uppercase;">Live Users</p>
+                    <h2 style="color: var(--gold); margin-bottom: 5px;">{{ stats.users }}</h2>
+                    <p style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Live Users</p>
                 </div>
             </div>
 
@@ -248,7 +249,7 @@ DASH_HTML = BASE_CSS + """
                         <label>Music Player <span class="switch"><input type="checkbox" name="music" {% if settings.music %}checked{% endif %}><span class="slider"></span></span></label>
                     </div>
                 </div>
-                <button type="submit" class="btn animate-up d-3" style="width: 100%; padding: 15px; font-size: 1.1rem;">Save All Changes</button>
+                <button type="submit" class="btn btn-gold animate-up d-3" style="width: 100%; padding: 15px; font-size: 1.1rem;">Save All Changes</button>
             </form>
         </div>
     </div>
@@ -261,13 +262,12 @@ DASH_HTML = BASE_CSS + """
 def home():
     user = session.get('user')
     db = get_db()
+    stats = {"servers": 0, "users": 0} # Shows 0 if bot hasn't connected to DB yet
     
-    # Fetch LIVE Bot Stats for Homepage
-    stats_doc = db.bot_stats.find_one({"_id": "live_stats"})
-    if stats_doc:
-        stats = {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
-    else:
-        stats = {"servers": "10K", "users": "50K"} # Fallback before bot connects to DB
+    if db:
+        stats_doc = db.stats.find_one({"_id": "live_stats"})
+        if stats_doc:
+            stats = {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
 
     return render_template_string(HOME_HTML, user=user, stats=stats)
 
@@ -295,26 +295,21 @@ def dashboard():
         return redirect('/login')
     
     db = get_db()
-    
-    # 1. Fetch LIVE Bot Stats
-    stats_doc = db.bot_stats.find_one({"_id": "live_stats"})
-    if stats_doc:
-        stats = {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
-    else:
-        stats = {"servers": 0, "users": 0}
+    stats = {"servers": 0, "users": 0}
+    settings = {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
 
-    # 2. Fetch Real User Settings from DB
-    settings_doc = db.user_settings.find_one({"user_id": user['id']})
-    if not settings_doc:
-        settings = {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
-    else:
-        settings = {
-            "prefix": settings_doc.get("prefix", "!"),
-            "welcome_message": settings_doc.get("welcome_message", "Welcome!"),
-            "anti_raid": settings_doc.get("anti_raid", False),
-            "music": settings_doc.get("music", True)
-        }
-    
+    if db:
+        # Fetch Stats
+        stats_doc = db.stats.find_one({"_id": "live_stats"})
+        if stats_doc:
+            stats = {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
+        
+        # Fetch Settings
+        config_doc = db.config.find_one({"_id": "global"})
+        if config_doc:
+            settings.update(config_doc)
+            settings.pop('_id', None)
+
     saved = request.args.get('saved', False)
     return render_template_string(DASH_HTML, user=user, settings=settings, stats=stats, saved=saved)
 
@@ -325,17 +320,18 @@ def save_settings():
         return redirect('/login')
     
     db = get_db()
-    
-    # Save REAL settings to the database
+    if not db:
+        return "Database not connected", 500
+        
     new_settings = {
-        "user_id": user['id'],
         "prefix": request.form.get('prefix', '!'),
         "welcome_message": request.form.get('welcome_message', 'Welcome!'),
         "anti_raid": 'anti_raid' in request.form,
         "music": 'music' in request.form
     }
     
-    db.user_settings.update_one({"user_id": user['id']}, {"$set": new_settings}, upsert=True)
+    # Save to a global config document
+    db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
     
     return redirect('/dashboard?saved=true')
 

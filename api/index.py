@@ -1,8 +1,15 @@
 import os
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from authlib.integrations.flask_client import OAuth
-from pymongo import MongoClient
-from pymongo.errors import PyMongoError
+
+# We import these safely in case they aren't installed properly on Vercel
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import PyMongoError, ConfigurationError
+except ImportError:
+    MongoClient = None
+    PyMongoError = Exception
+    ConfigurationError = Exception
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "super-secret-random-string")
@@ -19,26 +26,29 @@ discord = oauth.register(
     client_kwargs={'scope': 'identify guilds'}
 )
 
-# Connect to MongoDB Globally (So it doesn't reconnect on every page load)
-mongo_uri = os.getenv("MONGO_URI")
+# Connect to MongoDB Globally with MAXIMUM safety
 db = None
-if mongo_uri:
+mongo_uri = os.getenv("MONGO_URI")
+if mongo_uri and MongoClient:
     try:
-        # Set a 5-second timeout so the website never freezes if DB is slow
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
         db = client.zenith_guard
+    except ConfigurationError as e:
+        print(f"MongoDB Configuration Error: {e}")
+        db = None
     except Exception as e:
-        print(f"Failed to connect to MongoDB: {e}")
+        print(f"MongoDB Connection Error: {e}")
+        db = None
 
 # Helper function to safely get stats
 def get_live_stats():
     if not db: 
-        return {"servers": 0, "users": 0}
+        return {"servers": "N/A", "users": "N/A"}
     try:
         stats_doc = db.stats.find_one({"_id": "live_stats"})
         if stats_doc:
             return {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
-    except PyMongoError:
+    except Exception:
         pass
     return {"servers": 0, "users": 0}
 
@@ -55,7 +65,7 @@ def get_user_settings(user_id):
                 "anti_raid": config_doc.get("anti_raid", False),
                 "music": config_doc.get("music", True)
             }
-    except PyMongoError:
+    except Exception:
         pass
     return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
 
@@ -345,7 +355,7 @@ def save_settings():
     
     try:
         db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
-    except PyMongoError:
+    except Exception:
         pass
     
     return redirect('/dashboard?saved=true')

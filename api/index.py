@@ -2,6 +2,7 @@ import os
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from authlib.integrations.flask_client import OAuth
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "super-secret-random-string")
@@ -18,13 +19,45 @@ discord = oauth.register(
     client_kwargs={'scope': 'identify guilds'}
 )
 
-# Connect to MongoDB safely
-def get_db():
-    mongo_uri = os.getenv("MONGO_URI")
-    if not mongo_uri:
-        return None
-    client = MongoClient(mongo_uri)
-    return client.zenith_guard
+# Connect to MongoDB Globally (So it doesn't reconnect on every page load)
+mongo_uri = os.getenv("MONGO_URI")
+db = None
+if mongo_uri:
+    try:
+        # Set a 5-second timeout so the website never freezes if DB is slow
+        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        db = client.zenith_guard
+    except Exception as e:
+        print(f"Failed to connect to MongoDB: {e}")
+
+# Helper function to safely get stats
+def get_live_stats():
+    if not db: 
+        return {"servers": 0, "users": 0}
+    try:
+        stats_doc = db.stats.find_one({"_id": "live_stats"})
+        if stats_doc:
+            return {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
+    except PyMongoError:
+        pass
+    return {"servers": 0, "users": 0}
+
+# Helper function to safely get settings
+def get_user_settings(user_id):
+    if not db:
+        return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
+    try:
+        config_doc = db.config.find_one({"_id": "global"})
+        if config_doc:
+            return {
+                "prefix": config_doc.get("prefix", "!"),
+                "welcome_message": config_doc.get("welcome_message", "Welcome!"),
+                "anti_raid": config_doc.get("anti_raid", False),
+                "music": config_doc.get("music", True)
+            }
+    except PyMongoError:
+        pass
+    return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
 
 # --- PREMIUM BLUE / WHITE / GOLD CSS ---
 BASE_CSS = """
@@ -110,6 +143,7 @@ BASE_CSS = """
 </style>
 """
 
+# --- HTML TEMPLATES ---
 HOME_HTML = BASE_CSS + """
 <!DOCTYPE html>
 <html>
@@ -261,14 +295,7 @@ DASH_HTML = BASE_CSS + """
 @app.route("/")
 def home():
     user = session.get('user')
-    db = get_db()
-    stats = {"servers": 0, "users": 0} # Shows 0 if bot hasn't connected to DB yet
-    
-    if db:
-        stats_doc = db.stats.find_one({"_id": "live_stats"})
-        if stats_doc:
-            stats = {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
-
+    stats = get_live_stats()
     return render_template_string(HOME_HTML, user=user, stats=stats)
 
 @app.route("/login")
@@ -294,22 +321,9 @@ def dashboard():
     if not user:
         return redirect('/login')
     
-    db = get_db()
-    stats = {"servers": 0, "users": 0}
-    settings = {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
-
-    if db:
-        # Fetch Stats
-        stats_doc = db.stats.find_one({"_id": "live_stats"})
-        if stats_doc:
-            stats = {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
-        
-        # Fetch Settings
-        config_doc = db.config.find_one({"_id": "global"})
-        if config_doc:
-            settings.update(config_doc)
-            settings.pop('_id', None)
-
+    stats = get_live_stats()
+    settings = get_user_settings(user['id'])
+    
     saved = request.args.get('saved', False)
     return render_template_string(DASH_HTML, user=user, settings=settings, stats=stats, saved=saved)
 
@@ -319,7 +333,6 @@ def save_settings():
     if not user:
         return redirect('/login')
     
-    db = get_db()
     if not db:
         return "Database not connected", 500
         
@@ -330,8 +343,10 @@ def save_settings():
         "music": 'music' in request.form
     }
     
-    # Save to a global config document
-    db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
+    try:
+        db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
+    except PyMongoError:
+        pass
     
     return redirect('/dashboard?saved=true')
 

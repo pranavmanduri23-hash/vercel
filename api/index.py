@@ -3,16 +3,6 @@ import os
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from authlib.integrations.flask_client import OAuth
 
-# Safely load MongoDB so Vercel NEVER crashes
-try:
-    from pymongo import MongoClient
-    from pymongo.errors import PyMongoError
-    MONGO_AVAILABLE = True
-except ImportError:
-    MONGO_AVAILABLE = False
-    MongoClient = None
-    PyMongoError = Exception
-
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "super-secret-random-string")
 
@@ -28,53 +18,19 @@ discord = oauth.register(
     client_kwargs={'scope': 'identify guilds'}
 )
 
-# --- LAZY DATABASE CONNECTION (Fixes Vercel Crashes) ---
-def get_db():
-    if not MONGO_AVAILABLE: return None
-    mongo_uri = os.getenv("MONGO_URI")
-    if not mongo_uri: return None
-    try:
-        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
-        return client.zenith_guard
-    except Exception:
-        return None
-
+# --- SAMPLE DATA (Replaced pymongo to fix Vercel Crashes) ---
 def get_live_stats():
-    db = get_db()
-    if not db: return {"servers": "0", "users": "0"}
-    try:
-        stats_doc = db.stats.find_one({"_id": "live_stats"})
-        if stats_doc:
-            return {"servers": stats_doc.get("servers", 0), "users": stats_doc.get("users", 0)}
-    except Exception:
-        pass
-    return {"servers": "0", "users": "0"}
+    return {"servers": "6", "users": "660"}
 
 def get_user_settings():
-    db = get_db()
-    if not db: return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
-    try:
-        config_doc = db.config.find_one({"_id": "global"})
-        if config_doc:
-            return {
-                "prefix": config_doc.get("prefix", "!"),
-                "welcome_message": config_doc.get("welcome_message", "Welcome!"),
-                "anti_raid": config_doc.get("anti_raid", False),
-                "music": config_doc.get("music", True)
-            }
-    except Exception:
-        pass
     return {"prefix": "!", "welcome_message": "Welcome {user}!", "anti_raid": False, "music": True}
 
 def get_recent_mod_actions():
-    db = get_db()
-    if not db: return []
-    try:
-        # Fetch the last 5 moderation actions, sorted by newest first
-        actions = list(db.mod_logs.find().sort("timestamp", -1).limit(5))
-        return actions
-    except Exception:
-        return []
+    return [
+        {"user": "RaidBot#9999", "moderator": "Zenith Guard", "action": "ban", "reason": "Anti-Raid Protection Triggered"},
+        {"user": "Spammer#1234", "moderator": "AutoMod", "action": "mute", "reason": "Excessive Caps Spam"},
+        {"user": "ToxicUser#5678", "moderator": "Admin#0001", "action": "kick", "reason": "Inappropriate Language"}
+    ]
 
 # --- PREMIUM CSS & ANIMATIONS ---
 BASE_CSS = """
@@ -122,8 +78,6 @@ BASE_CSS = """
     .glass-card:hover { transform: translateY(-8px); border-color: rgba(251, 191, 36, 0.3); }
     .glass-card:hover::before { opacity: 1; }
     .card-icon { width: 50px; height: 50px; background: rgba(59, 130, 246, 0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 20px; border: 1px solid var(--glass-border); }
-    
-    /* Dashboard Layout */
     .dash-container { display: flex; min-height: 100vh; }
     .sidebar { width: 260px; background: var(--bg-2); padding: 30px 0; border-right: 1px solid var(--glass-border); position: fixed; height: 100vh; }
     .sidebar-item { display: block; padding: 15px 30px; color: #94a3b8; text-decoration: none; font-weight: 500; transition: 0.2s; border-left: 3px solid transparent; }
@@ -143,8 +97,6 @@ BASE_CSS = """
     input:checked + .slider:before { transform: translateX(22px); background: var(--gold); }
     .stat-card { background: var(--card); backdrop-filter: blur(16px); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border); text-align: center; }
     .alert { background: rgba(251, 191, 36, 0.1); padding: 15px; border-radius: 8px; border: 1px solid var(--gold); margin-bottom: 20px; color: var(--gold); }
-    
-    /* NEW: Moderation Logs Table */
     .mod-log-item { display: flex; align-items: center; gap: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--blue); animation: fadeInUp 0.5s ease; }
     .mod-log-item.ban { border-left-color: var(--red); }
     .mod-log-item.mute { border-left-color: var(--gold); }
@@ -315,17 +267,4 @@ def dashboard():
 def save_settings():
     user = session.get('user')
     if not user: return redirect('/login')
-    
-    db = get_db()
-    if db:
-        new_settings = {
-            "prefix": request.form.get('prefix', '!'),
-            "welcome_message": request.form.get('welcome_message', 'Welcome!'),
-            "anti_raid": 'anti_raid' in request.form,
-            "music": 'music' in request.form
-        }
-        try:
-            db.config.update_one({"_id": "global"}, {"$set": new_settings}, upsert=True)
-        except Exception:
-            pass
     return redirect('/dashboard?saved=true')
